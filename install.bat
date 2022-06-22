@@ -3,7 +3,7 @@ setlocal enableextensions
 
 cd %~dp0
 
-set TF_VERSION=2.5
+set TF_VERSION=2.8.2
 set URL=https://github.com/am15h/tflite_flutter_plugin/releases/download/
 set TAG=tf_%TF_VERSION%
 
