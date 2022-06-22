@@ -12,8 +12,8 @@ List<TensorImage> getHummingbirdImages() {
   List<TensorImage> inputImages = [];
   for (int i = 0; i <= 259; i++) {
     String imageNum = i.toString().padLeft(3, '0');
-    File imageFile =
-        File.fromUri(Uri.parse('assets/hummingbird/frame_$imageNum-0.04s.png'));
+    File imageFile = File.fromUri(
+        Uri.parse('assets/hummingbird/frame_${imageNum}_delay-0.04s.png'));
     TensorImage tensorImage = TensorImage.fromFile(imageFile);
     inputImages.add(tensorImage);
   }
@@ -115,7 +115,7 @@ void runRepnet() async {
 
   // load file into memory
   tfl.Interpreter interpreter =
-      await tfl.Interpreter.fromAsset("repnet.tflite");
+      await tfl.Interpreter.fromAsset("repnet2.5.tflite");
 
   int counts = getCounts(interpreter);
 
