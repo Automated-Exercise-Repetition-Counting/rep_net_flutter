@@ -1,67 +1,125 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:tflite_flutter/tflite_flutter.dart' as tfl;
-// to use root bundle
-import 'package:flutter/services.dart' as services;
+import 'package:tflite_flutter_helper/tflite_flutter_helper.dart';
 
 void main() {
   runApp(const MyApp());
 }
 
-Future<List<services.ByteData>> getHummingbirdImages() async {
-  final AssetBundle rootBundle = services.rootBundle;
-  List<services.ByteData> inputImages = [];
+List<TensorImage> getHummingbirdImages() {
+  List<TensorImage> inputImages = [];
   for (int i = 0; i <= 259; i++) {
-    // int formatted to 3sf
     String imageNum = i.toString().padLeft(3, '0');
-    // final image = Image.asset('assets/hummingbird/frame_$imageNum-0.04s.png');
-    final imageBytes =
-        await rootBundle.load('assets/hummingbird/frame_$imageNum-0.04s.png');
-    // convert image to bytes
-    inputImages.add(imageBytes);
+    File imageFile =
+        File.fromUri(Uri.parse('assets/hummingbird/frame_$imageNum-0.04s.png'));
+    TensorImage tensorImage = TensorImage.fromFile(imageFile);
+    inputImages.add(tensorImage);
   }
   return inputImages;
 }
 
-List<services.ByteData> preprocessImages(List<services.ByteData images) {
-  
+List<TensorImage> preprocessImages(List<TensorImage> images) {
+  double imageMean = 127.5;
+  double imageStd = 127.5;
+  int imageSize = 224;
+
+  ImageProcessor imageProcessor = ImageProcessorBuilder()
+      .add(CastOp(tfl.TfLiteType.float32))
+      .add(NormalizeOp(imageMean, imageStd))
+      .add(ResizeOp(imageSize, imageSize, ResizeMethod.BILINEAR))
+      .build();
+
+  List<TensorImage> preprocessedImages = [];
+
+  for (TensorImage image in images) {
+    TensorImage processedImage = imageProcessor.process(image);
+    preprocessedImages.add(processedImage);
+  }
+
+  return preprocessedImages;
 }
 
-void getCounts() async {
-  List<services.ByteData> images = await getHummingbirdImages();
+List<int> clipByValue(List<int> idxes, int min, int max) {
+  for (int i = 0; i < idxes.length; i++) {
+    if (idxes[i] < min) {
+      idxes[i] = min;
+    } else if (idxes[i] > max) {
+      idxes[i] = max;
+    }
+  }
+
+  return idxes;
+}
+
+int getCounts(tfl.Interpreter interpreter) {
+  List<TensorImage> images = getHummingbirdImages();
+  images = preprocessImages(images);
   int sequenceLength = images.length;
   List rawScoresList = [];
   List scores = [];
   List withinPeriodScoresList = [];
 
+  List<int> strides = [1, 2, 3, 4];
+  int batchSize = 1;
+  double THRESHOLD = 0.2;
+  double WITHIN_PERIOD_THRESHOLD = 0.5;
+
   int modelNumFrames = 64;
   int modelImageSize = 112;
 
+  for (int stride in strides) {
+    int numBatches =
+        (sequenceLength / modelNumFrames / stride / batchSize).ceil();
+    List<double> rawScoresPerStride = [];
+    List<double> withinPeriodScoresPerStride = [];
 
+    for (int batchNum = 0; batchNum < numBatches; batchNum++) {
+      int start = batchNum * batchSize * modelNumFrames * stride;
+      int end = (batchNum + 1) * batchSize * modelNumFrames * stride;
+
+      List<int> idxes = [for (int i = start; i < end; i += stride) i];
+      idxes = clipByValue(idxes, 0, sequenceLength - 1);
+
+      // gather frames for the batch
+      List<TensorBuffer> batchImages = [];
+      for (int i = 0; i < idxes.length; i++) {
+        TensorBuffer image = images[idxes[i]].getTensorBuffer();
+        batchImages.add(image);
+      }
+
+      // run inference
+      List rawScores = List<double>.filled(1 * 64 * 32, 0).reshape([1, 64, 32]);
+      List withinPeriodScores =
+          List<double>.filled(1 * 64 * 1, 0).reshape([1, 64, 1]);
+      List periodScores =
+          List<double>.filled(1 * 64 * 512, 0).reshape([1, 64, 512]);
+      var outputBuffers = [rawScores, withinPeriodScores, periodScores];
+
+      interpreter.run(batchImages, outputBuffers);
+
+      print(outputBuffers);
+    }
+  }
+  return 0;
 }
 
 void runRepnet() async {
-  // final interpreter = await tfl.Interpreter.fromAsset('repnet.tflite');
-  // final input = interpreter.getInputTensor(0);
-  // final output = interpreter.getOutputTensor(0);
+  // check if the model file exists
+  // File modelFile = File('/assets/repnet.tflite');
+  // if (!modelFile.existsSync()) {
+  //   print('Model file not found');
+  //   return;
+  // }
 
-  // ImageProcessor imageProcessor = ImageProcessorBuilder()
-  //     .add(ResizeOp(112, 112, ResizeMethod.BILINEAR))
-  //     .build();
+  // load file into memory
+  tfl.Interpreter interpreter =
+      await tfl.Interpreter.fromAsset("repnet.tflite");
 
-  // TensorImage inputTensorImg = TensorImage.fromFile('test.jpg');
+  int counts = getCounts(interpreter);
 
-  // inputTensorImg = imageProcessor.process(inputTensorImg);
-
-  // // inference
-  // interpreter.run(inputTensorImg, output);
-
-  // // print the output
-  // print(output);
-
-  // print(interpreter.getInputTensors());
-  // print(interpreter.getOutputTensors());
-
-  // interpreter.close();
+  interpreter.close();
 }
 
 class MyApp extends StatelessWidget {
